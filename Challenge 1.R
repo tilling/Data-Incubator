@@ -130,50 +130,147 @@ Markov.Above.Below <- function (n.max, lo, hi) {
   return( sum(prob.ever[range]))
 }
 
-East.West.10.true <- Markov.Above.Below(10, -2, 2)
-East.West.30.true <- Markov.Above.Below(30, -2, 2)
 
-Markov1D <- function(n.moves, is.true) {
-  #is.true is a function of the current and previous
-  #point.
-  #For each move, p is the probability of 
-  #the proposition being true. The real states at
-  #each point i is (at i, TRUE) and (at i, FALSE).
+
+#Now you have to re-create that general setup in 2D.
+#Never used Markov1D (I used Position.1D and Ever.1D instead)
+#so it's gone.
+
+#Simulation equivalents:
+#Sim2D, ever.far, ever.above.now.below
+#(should be possible to use the same exact code on)
+#x coordinates of simulations
+
+make.sim.2D <- function(n.moves) {
   
-  n.points = 2*n.moves + 1;
-  ctr = n.moves + 1; #the index for "0"
-  markov.probs <- vector(n.moves, mode='list')
-  #initialize
+  deltas <- matrix(0, nr=n.moves, nc=2)
+  path <- matrix(0, nr=1+n.moves, nc=2)
   
-  markov.probs[[1]] <- list(
-    true = rep(0, n.points)
-    #false = rep(0, n.points) #EXCEPT
-    #false[ctr] <- 1
-    #sum(true) + sum(false) must = 1
-    )
+  #Choose x or y as 1 or 2.
+  which.dim <- 1 + rbinom(n.moves, size=1, prob=0.5)
   
-  #Make simple index vectors for left and right--
-  #you'll use them!
-  left <- 1:(n.points - 1)
-  shift.left <- 1
-  shift.right <- 2
-  was.true <- 1
-  was.false <- 2
-  right <- 2:n.points
+  #Choose pluses and minuses (for whichever dimension)
+  which.move <- rbinom(n.moves, size=1, prob=0.5)
+  move <- (-1)^which.move
   
-  for(i.moves in 2:n.moves) {
-    last.probs <- markov.probs[[i.moves - 1]]
-    new.probs$true <- rep(0, n.points)
-    new.probs$true <- adjust.vector(new.probs$true,
-                          last.probs$true, 1, 0.5*is.true[shift.left, was.true])
-    new.probs$true <- adjust.vector(new.probs$true,
-                          last.probs$false, -1, 0.5*is.true[shift.right, was.true])
   
-    new.probs$false <- rep(0, n.points)
-    new.probs$false <- adjust.vector(new.probs$true,
-                           last.probs$true, 1, 0.5*is.true[shift.left, was.true])
-    new.probs$false <- adjust.vector(new.probs$true,
-                           last.probs$true, -1, 0.5*is.true[shift.right, was.true])
+  for (i in 1:2) {
+    i.inds <- (which.dim==i)
+    #Put the correct +/- 1's in the column
+    #Others are of course 0
+    #Check by rowSumming
+    deltas[i.inds,i] <- move[i.inds]
+    path[,i] <- c(0, cumsum(deltas[,i]))
+  }
+  row.check <- rowSums(abs(deltas))
+  return(list(deltas=deltas, path=path, row.check = row.check))
+}
+#Looks good
+
+Sim2D <- function(n.sim, n.moves, fn.path) {
+  #n.sim is number of simulations
+  #n.moves is number of moves per simulation
+  
+  #sim.vals <- vector(mode='list', length=n.sim)
+  sim.vals <- rep(NA, n.sim)
+  for (i.sim in 1:n.sim) {
+    #Each path is represented by a column of
+    #x's and a column of y's.
+    path <- make.sim.2D(n.moves)$path
+    sim.vals[i.sim] <- fn.path(path)
+  }
+  expected <- mean(sim.vals, na.rm=TRUE)
+  sigma <- sd(sim.vals, na.rm=TRUE)
+  se <- sigma / sqrt(n.sim)
+  bad <- mean(is.na(sim.vals))
+
+  return( c(expected + se*c(-1.96, 0, 1.96),
+            bad) )
+}
+
+is.so.far <- function(r) {
+  function(path) {
+    #Take last row of path
+    xy <- path[ nrow(path) , ]
+    distance <- sqrt( sum (xy^2) )
+    return(distance >= r)     
   }
 }
+
+ever.so.far <- function(r) {
+  function(path) {
+    distance <- sqrt( rowSums (path^2) )
+    return(max(distance) >= r)     
+  }
+}
+
+mean.time <- function(r) {
+  #This one needs n.moves >> r.
+  function(path) {
+    distance <- sqrt( rowSums (path^2) )
+    #Condition on whether you get there
+    if (max(distance) >= r) {
+      time.till <- min(which(distance >= r))
+      return(time.till)
+    } else {
+      return(NA)      
+    }
+    #Returns for all cases, function defined
+  }
+}
+
+ever.east.of <- function(east.bound) {
+  function(path) {
+    #Just use first column of path.
+    #Assume that's horizontal.
+    return (max(path[,1]) >= east.bound)
+  }
+}
+
+
+ever.east.now.west <- function(east.bound, west.bound) {
+  function(path) {
+    #Just use first column of path.
+    #Assume that's horizontal.
+    east.west <- path[,1]
+    n <- length(east.west)
+    return (max(east.west) >= east.bound & east.west[n] <= west.bound)
+  }
+}
+#Markov equivalents:
+#Need: adjust.vector to adjust.matrix
+#One routine equivalent to Position and Ever
+#where "ever" is either the condition of
+#having been >= r^2, or having been east of
+#1st st.
+#Variables needed in loop:
+#Matrices x and y of positions
+#Matrix p of probs (starts with 1 at center)
+#Matrices p.ever.r2 and p.ever.east
+
+adjust.matrix <- function(x, y, dx=0, dy=0, mult=1) {
+  #Adjust the first n-shift entries of x by
+  #a multiplier of the rightmost n-shift entries
+  #of y
+  n <- length(x) #it had better be length(y) too
+  base.range <- 1:(n - abs(shift))
+  if (shift >= 0) {
+    x.inds <- base.range
+    y.inds <- x.inds + shift
+  } else {
+    y.inds <- base.range
+    x.inds <- y.inds - shift
+  }
+  x[x.inds] <- x[x.inds] + mult * y[y.inds]
+  return(x)
+}
+
+is.3.10 <- Sim2D(1e6, 10, is.so.far(3))
+is.10.60 <- Sim2D(1e6, 60, is.so.far(10))
+
+ever.5.10 <- Sim2D(1e6, 10, ever.so.far(5))
+ever.10.60 <- Sim2D(1e6, 60, ever.so.far(10))
+
+
+
 
